@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from "react";
 const WEEKDAY_BUDGET = 1500;
 const WEEKEND_BUDGET = 15000;
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
-const QUICK_AMOUNTS = [100, 300, 500, 1000, 1500, 2000, 3000, 5000];
 const CATEGORIES = [
   { id: "food", label: "食費", icon: "🍙" },
   { id: "drink", label: "飲料", icon: "☕" },
@@ -50,11 +49,10 @@ export default function BudgetTracker() {
   const [selectedDate, setSelectedDate] = useState(() => formatDate(new Date()));
   const [weekOffset, setWeekOffset] = useState(0);
   const [expenses, setExpenses] = useState({});
-  const [inputAmount, setInputAmount] = useState("");
+  const [inputAmount, setInputAmount] = useState(0);
   const [inputCategory, setInputCategory] = useState("food");
   const [inputMemo, setInputMemo] = useState("");
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("main");
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const currentWeek = (() => {
@@ -98,13 +96,16 @@ export default function BudgetTracker() {
     }
   };
 
+  const incrementAmount = (val) => {
+    setInputAmount((prev) => prev + val);
+  };
+
   const addExpense = async () => {
-    const amount = parseInt(inputAmount);
-    if (!amount || amount <= 0) return;
+    if (!inputAmount || inputAmount <= 0) return;
 
     const entry = {
       id: Date.now().toString(),
-      amount,
+      amount: inputAmount,
       category: inputCategory,
       memo: inputMemo,
       time: new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }),
@@ -114,7 +115,7 @@ export default function BudgetTracker() {
     const newExpenses = { ...expenses, [selectedDate]: [...dayExpenses, entry] };
     setExpenses(newExpenses);
     await saveExpenses(newExpenses);
-    setInputAmount("");
+    setInputAmount(0);
     setInputMemo("");
   };
 
@@ -157,7 +158,6 @@ export default function BudgetTracker() {
   };
 
   const todayStr = formatDate(today);
-  const isCurrentWeek = weekOffset === 0;
   const selectedIsWeekend = isWeekend(selectedDate);
   const remaining = getRemaining(selectedDate);
   const spent = selectedIsWeekend ? getWeekendTotal() : getDayTotal(selectedDate);
@@ -231,7 +231,7 @@ export default function BudgetTracker() {
             return (
               <button
                 key={dateStr}
-                onClick={() => { setSelectedDate(dateStr); setView("main"); }}
+                onClick={() => setSelectedDate(dateStr)}
                 style={{
                   flex: 1,
                   padding: "6px 0 4px",
@@ -270,8 +270,64 @@ export default function BudgetTracker() {
         </div>
       </div>
 
-      {/* Budget Summary Card */}
+      {/* Week summary */}
       <div style={{ padding: "16px 16px 0" }}>
+        <h3 style={{ margin: "0 0 8px", fontSize: 13, color: "#999", fontWeight: 500 }}>
+          今週のまとめ
+        </h3>
+        <div style={{
+          background: "#fff",
+          borderRadius: 16,
+          padding: 16,
+          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "#999" }}>週の合計</div>
+              <div style={{ fontSize: 20, fontWeight: 700, fontFeatureSettings: "'tnum'" }}>
+                ¥{getWeekTotal().toLocaleString()}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "#999" }}>週ののこり</div>
+              <div style={{
+                fontSize: 20, fontWeight: 700,
+                color: getRemainingColor(getWeekBudget() - getWeekTotal(), getWeekBudget()),
+                fontFeatureSettings: "'tnum'",
+              }}>
+                ¥{(getWeekBudget() - getWeekTotal()).toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          {/* Mini bar chart */}
+          <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 48 }}>
+            {weekDates.map((dateStr, i) => {
+              const dayTotal = getDayTotal(dateStr);
+              const dayBudget = i >= 5 ? WEEKEND_BUDGET / 2 : WEEKDAY_BUDGET;
+              const barRatio = dayBudget > 0 ? Math.min(dayTotal / dayBudget, 1.5) : 0;
+              const over = dayTotal > dayBudget;
+              return (
+                <div key={dateStr} style={{ flex: 1, textAlign: "center" }}>
+                  <div style={{
+                    height: Math.max(barRatio * 32, dayTotal > 0 ? 4 : 0),
+                    borderRadius: 3,
+                    background: over ? "#c44040" : dateStr === selectedDate ? "#2d8a6e" : "#d5d0c6",
+                    transition: "all 0.3s",
+                    marginBottom: 4,
+                  }} />
+                  <div style={{ fontSize: 9, color: dateStr === todayStr ? "#2a2a2a" : "#bbb", fontWeight: dateStr === todayStr ? 700 : 400 }}>
+                    {DAY_LABELS[(i + 1) % 7]}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Budget Summary Card */}
+      <div style={{ padding: "12px 16px 0" }}>
         <div style={{
           background: "#fff",
           borderRadius: 16,
@@ -287,7 +343,6 @@ export default function BudgetTracker() {
             </span>
           </div>
 
-          {/* Progress bar */}
           <div style={{
             height: 8, borderRadius: 4,
             background: "#eee",
@@ -333,60 +388,76 @@ export default function BudgetTracker() {
           padding: 16,
           boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
         }}>
-          {/* Quick amounts */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-            {QUICK_AMOUNTS.map((amt) => (
+          {/* Amount preview + clear */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 12,
+            padding: "10px 14px",
+            background: "#f7f5f0",
+            borderRadius: 12,
+          }}>
+            <div style={{
+              fontSize: 28,
+              fontWeight: 700,
+              color: inputAmount > 0 ? "#2a2a2a" : "#ccc",
+              fontFeatureSettings: "'tnum'",
+              letterSpacing: "-0.5px",
+            }}>
+              ¥{inputAmount.toLocaleString()}
+            </div>
+            {inputAmount > 0 && (
               <button
-                key={amt}
-                onClick={() => setInputAmount(String(amt))}
+                onClick={() => setInputAmount(0)}
                 style={{
-                  padding: "6px 10px",
-                  border: inputAmount === String(amt) ? "2px solid #2d8a6e" : "1px solid #ddd",
-                  borderRadius: 20,
-                  background: inputAmount === String(amt) ? "#e8f5f0" : "#fafafa",
-                  color: inputAmount === String(amt) ? "#2d8a6e" : "#555",
-                  fontSize: 13,
-                  fontWeight: 600,
+                  width: 28, height: 28,
+                  border: "none",
+                  borderRadius: "50%",
+                  background: "#ddd",
+                  color: "#666",
+                  fontSize: 14,
                   cursor: "pointer",
-                  transition: "all 0.15s",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
                 }}
               >
-                ¥{amt.toLocaleString()}
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Increment buttons */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {[1, 10, 100, 1000].map((val) => (
+              <button
+                key={val}
+                onClick={() => incrementAmount(val)}
+                style={{
+                  flex: 1,
+                  padding: "12px 0",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 10,
+                  background: "#fafafa",
+                  color: "#2a2a2a",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.1s",
+                }}
+                onPointerDown={(e) => e.currentTarget.style.background = "#f0f0f0"}
+                onPointerUp={(e) => e.currentTarget.style.background = "#fafafa"}
+                onPointerLeave={(e) => e.currentTarget.style.background = "#fafafa"}
+              >
+                +¥{val.toLocaleString()}
               </button>
             ))}
           </div>
 
-          {/* Amount input */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <div style={{ position: "relative", flex: 1 }}>
-              <span style={{
-                position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
-                color: "#999", fontSize: 16, fontWeight: 600,
-              }}>¥</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                value={inputAmount}
-                onChange={(e) => setInputAmount(e.target.value)}
-                placeholder="金額"
-                style={{
-                  width: "100%",
-                  padding: "10px 12px 10px 28px",
-                  border: "1px solid #ddd",
-                  borderRadius: 10,
-                  fontSize: 18,
-                  fontWeight: 600,
-                  outline: "none",
-                  boxSizing: "border-box",
-                  background: "#fafafa",
-                  fontFeatureSettings: "'tnum'",
-                }}
-              />
-            </div>
-          </div>
-
           {/* Category */}
-          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
@@ -429,16 +500,16 @@ export default function BudgetTracker() {
             />
             <button
               onClick={addExpense}
-              disabled={!inputAmount || parseInt(inputAmount) <= 0}
+              disabled={inputAmount <= 0}
               style={{
                 padding: "10px 20px",
                 border: "none",
                 borderRadius: 10,
-                background: inputAmount && parseInt(inputAmount) > 0 ? "#2a2a2a" : "#ccc",
+                background: inputAmount > 0 ? "#2a2a2a" : "#ccc",
                 color: "#fff",
                 fontSize: 14,
                 fontWeight: 600,
-                cursor: inputAmount && parseInt(inputAmount) > 0 ? "pointer" : "default",
+                cursor: inputAmount > 0 ? "pointer" : "default",
                 transition: "all 0.15s",
                 whiteSpace: "nowrap",
               }}
@@ -449,7 +520,7 @@ export default function BudgetTracker() {
         </div>
       </div>
 
-      {/* Today's expenses list */}
+      {/* Expenses list */}
       <div style={{ padding: "12px 16px 0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 13, color: "#999", fontWeight: 500 }}>
@@ -565,62 +636,6 @@ export default function BudgetTracker() {
             </div>
           );
         })()}
-      </div>
-
-      {/* Week summary */}
-      <div style={{ padding: "16px 16px 0" }}>
-        <h3 style={{ margin: "0 0 8px", fontSize: 13, color: "#999", fontWeight: 500 }}>
-          今週のまとめ
-        </h3>
-        <div style={{
-          background: "#fff",
-          borderRadius: 16,
-          padding: 16,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 11, color: "#999" }}>週の合計</div>
-              <div style={{ fontSize: 20, fontWeight: 700, fontFeatureSettings: "'tnum'" }}>
-                ¥{getWeekTotal().toLocaleString()}
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: "#999" }}>週ののこり</div>
-              <div style={{
-                fontSize: 20, fontWeight: 700,
-                color: getRemainingColor(getWeekBudget() - getWeekTotal(), getWeekBudget()),
-                fontFeatureSettings: "'tnum'",
-              }}>
-                ¥{(getWeekBudget() - getWeekTotal()).toLocaleString()}
-              </div>
-            </div>
-          </div>
-
-          {/* Mini bar chart */}
-          <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 48 }}>
-            {weekDates.map((dateStr, i) => {
-              const dayTotal = getDayTotal(dateStr);
-              const dayBudget = i >= 5 ? WEEKEND_BUDGET / 2 : WEEKDAY_BUDGET;
-              const barRatio = dayBudget > 0 ? Math.min(dayTotal / dayBudget, 1.5) : 0;
-              const over = dayTotal > dayBudget;
-              return (
-                <div key={dateStr} style={{ flex: 1, textAlign: "center" }}>
-                  <div style={{
-                    height: Math.max(barRatio * 32, dayTotal > 0 ? 4 : 0),
-                    borderRadius: 3,
-                    background: over ? "#c44040" : dateStr === selectedDate ? "#2d8a6e" : "#d5d0c6",
-                    transition: "all 0.3s",
-                    marginBottom: 4,
-                  }} />
-                  <div style={{ fontSize: 9, color: dateStr === todayStr ? "#2a2a2a" : "#bbb", fontWeight: dateStr === todayStr ? 700 : 400 }}>
-                    {DAY_LABELS[(i + 1) % 7]}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       {/* Footer */}
